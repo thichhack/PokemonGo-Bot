@@ -51,13 +51,13 @@ namespace PokemonGo.RocketAPI.Console
 
             buttonRefreshPokemon.Visible = false;
             buttonRefreshPokemon.Enabled = false;
-            buttonRefreshForts.Visible = false;
+            buttonRefreshForts.Visible = false;            
             this.asViewOnly = asViewOnly;
             panel1.Size = new Size(700,47);            
             if (asViewOnly)
             {
             	panel1.Size = new Size(483,71);
-                initViewOnly(team, level, exp);
+                initViewOnly(team, level, exp);               
             }
         }
 		
@@ -233,6 +233,21 @@ namespace PokemonGo.RocketAPI.Console
 
         Semaphore pokemonLock = new Semaphore(0, 1);
 
+        void infoObservable_HandleDeletePokemonLocation( string pokemon_Id)
+        {
+            try {
+                _pokemonOverlay.IsVisibile = false;
+                var pokemonMarker = _pokemonMarks[pokemon_Id];
+                _pokemonOverlay.Markers.Remove(pokemonMarker);
+                _pokemonMarks.Remove(pokemon_Id);
+                _pokemonOverlay.IsVisibile = true;
+            } catch (Exception e) {
+                Logger.ColoredConsoleWrite(ConsoleColor.DarkRed, "[Ignore]: sending exception information to log file.");
+                Logger.AddLog(string.Format("Error in infoObservable_HandleDeletePokemonLocation: {0}", e.ToString()));
+
+            }
+        }
+
         void infoObservable_HandleNewPokemonLocations(List<DataCollector.PokemonMapData> mapData)
         {
             Invoke(new MethodInvoker(() =>
@@ -264,7 +279,7 @@ namespace PokemonGo.RocketAPI.Console
                                 }
                                 else
                                 {
-                                    Bitmap pokebitMap = Pokemons.GetPokemonMediumImage(pokeData.PokemonId);
+                                    Bitmap pokebitMap = PokeImgManager.GetPokemonMediumImage(pokeData.PokemonId);
                                     if (pokebitMap != null)
                                     {
                                         var ImageSize = new System.Drawing.Size(pokebitMap.Width, pokebitMap.Height);
@@ -406,27 +421,57 @@ namespace PokemonGo.RocketAPI.Console
                             if (pokeGym.Id != null)
                             {
                                 var bitmap = Properties.MapData.pokegym;
+                                var color = Color.Black;
                                 switch (pokeGym.OwnedByTeam)
                                 {
                                     case POGOProtos.Enums.TeamColor.Blue:
                                         bitmap = Properties.MapData.pokegym_blue;
+                                        color = Color.Blue;
                                         break;
                                     case POGOProtos.Enums.TeamColor.Red:
                                         bitmap = Properties.MapData.pokegym_red;
+                                        color = Color.Red;
                                         break;
                                     case POGOProtos.Enums.TeamColor.Yellow:
                                         bitmap = Properties.MapData.pokegym_yellow;
+                                        color = Color.Yellow;
                                         break;
                                 };
 
-                                var str = StringUtils.getPokemonNameByLanguage(null, pokeGym.GuardPokemonId);
-                                str = string.Format("Guard: {0} - CP: {1}\nLevel:{2} ({3})", str, pokeGym.GuardPokemonCp, GetLevel(pokeGym.GymPoints), pokeGym.GymPoints);
+                                var str = string.Format("Level:{0} ({1})", GetLevel(pokeGym.GymPoints), pokeGym.GymPoints);
                                 var pokeGymMaker = new GMarkerGoogle(new PointLatLng(pokeGym.Latitude, pokeGym.Longitude), bitmap);
                                 pokeGymMaker.ToolTipText = string.Format("{0}\n{1}, {2}\n{3}", FindAddress(pokeGym.Latitude, pokeGym.Longitude), pokeGym.Latitude, pokeGym.Longitude, str);
                                 pokeGymMaker.ToolTip.Font = new System.Drawing.Font("Arial", 12, System.Drawing.GraphicsUnit.Pixel);
                                 pokeGymMaker.ToolTipMode = MarkerTooltipMode.OnMouseOver;
                                 _pokeGymsMarks.Add(pokeGym.Id, pokeGymMaker);
                                 _pokeGymsOverlay.Markers.Add(pokeGymMaker);
+                                // Show Guard
+                                GMarkerGoogle guardPokemonMarker;
+                                Bitmap pokebitMap = PokeImgManager.GetPokemonMediumImage( pokeGym.GuardPokemonId);
+                                
+                                var offsetY = 0;
+                                if (pokebitMap != null)
+                                {
+                                    for (int idx = 0; idx <pokebitMap.Width ; idx++) {
+                                        pokebitMap.SetPixel(idx,0,color);
+                                        pokebitMap.SetPixel(idx,pokebitMap.Height-1,color);
+                                    }
+                                    for (int idx = 0; idx <pokebitMap.Height ; idx++) {
+                                        pokebitMap.SetPixel(0,idx,color);
+                                        pokebitMap.SetPixel(pokebitMap.Width-1,idx,color);
+                                    }
+                                    var ImageSize = new System.Drawing.Size(pokebitMap.Width, pokebitMap.Height);
+                                    guardPokemonMarker = new GMarkerGoogle(new PointLatLng(pokeGym.Latitude, pokeGym.Longitude), pokebitMap);
+                                    offsetY = 5-pokebitMap.Height/2;
+                                }
+                                else
+                                {
+                                    guardPokemonMarker = new GMarkerGoogle(new PointLatLng(pokeGym.Latitude, pokeGym.Longitude), GMarkerGoogleType.green_small);
+                                    
+                                }
+                                guardPokemonMarker.Offset = new Point(-bitmap.Width/2-8, offsetY-bitmap.Height);
+                                _pokeGymsMarks.Add(pokeGym.Id+"-"+pokeGym.GuardPokemonId, guardPokemonMarker);
+                                _pokeGymsOverlay.Markers.Add(guardPokemonMarker);
                             }
                             else
                             {
@@ -526,7 +571,6 @@ namespace PokemonGo.RocketAPI.Console
             _circle = CreateCircle(new PointLatLng(Globals.latitute, Globals.longitude), Globals.radius, 100);
             routeOverlay.Polygons.Add(_circle);
             
-
             map.Overlays.Add(routeOverlay);
             map.Overlays.Add(_pokeStopsOverlay);
             map.Overlays.Add(_pokemonOverlay);
@@ -568,6 +612,7 @@ namespace PokemonGo.RocketAPI.Console
             Globals.infoObservable.HandlePokeStopInfoUpdate += InfoObservable_HandlePokeStopInfoUpdate;
             Globals.infoObservable.HandleClearPokemon += infoObservable_HandleClearPokemon;
             Globals.infoObservable.HandleNewPokemonLocations += infoObservable_HandleNewPokemonLocations;
+            Globals.infoObservable.HandleDeletePokemonLocation += infoObservable_HandleDeletePokemonLocation;
         }
 
 
@@ -759,6 +804,6 @@ namespace PokemonGo.RocketAPI.Console
             _botMarker.ToolTipMode = MarkerTooltipMode.OnMouseOver;
             routeOverlay.Markers.Add(_botMarker);
 			routeOverlay.IsVisibile =true;
-		}	
-	}
+		}        
+    }
 }
